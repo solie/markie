@@ -1,0 +1,31 @@
+{
+  "name": "markie",
+  "version": "0.1.0",
+  "description": "High-performance desktop Markdown editor & viewer powered by Rust (markdown-rs) and Tauri",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "preview": "bun server.js"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.2.0",
+    "@viz-js/viz": "^3.31.0",
+    "dictionary-en": "^4.0.0",
+    "dictionary-en-gb": "^3.0.0",
+    "katex": "^0.19.0",
+    "mermaid": "^12.1.0",
+    "nspell": "^2.1.5",
+    "retext": "^9.0.0",
+    "retext-english": "^5.0.0",
+    "retext-equality": "^7.1.0",
+    "retext-passive": "^5.0.0",
+    "retext-repeated-words": "^5.0.0",
+    "retext-simplify": "^8.0.0",
+    "retext-spell": "^6.1.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.2.7"
+  }
+}

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Markie - Rust Markdown Editor & Viewer</title>
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-dark">
+  <header class="app-header">
+    <div class="header-left">
+      <div class="brand">
+        <span class="brand-icon">🦀</span>
+        <span class="brand-name">Markie</span>
+      </div>
+      <div class="file-info">
+        <span id="doc-title" class="doc-title">Untitled.md</span>
+        <span id="save-status" class="save-status saved">Saved</span>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <div class="btn-group">
+        <button id="btn-new" class="btn" title="New File (Ctrl+N)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+          New
+        </button>
+        <button id="btn-open" class="btn" title="Open File (Ctrl+O)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+          Open
+        </button>
+        <button id="btn-save" class="btn btn-primary" title="Save File (Ctrl+S)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+          Save
+        </button>
+        <button id="btn-export" class="btn" title="Export HTML (Ctrl+E)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          Export HTML
+        </button>
+      </div>
+
+      <div class="view-toggles">
+        <button id="view-split" class="btn-toggle active" title="Split View">Split</button>
+        <button id="view-edit" class="btn-toggle" title="Editor Only">Edit</button>
+        <button id="view-preview" class="btn-toggle" title="Preview Only">View</button>
+      </div>
+
+      <div class="utility-actions">
+        <button id="btn-toc" class="btn-icon" title="Table of Contents">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="15" y2="12"></line><line x1="3" y1="18" x2="18" y2="18"></line></svg>
+        </button>
+        <button id="btn-ast" class="btn-icon" title="markdown-rs AST Inspector (Ctrl+Shift+A)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><polyline points="8 12 12 16 16 12"></polyline><line x1="12" y1="8" x2="12" y2="16"></line></svg>
+        </button>
+        <button id="btn-theme" class="btn-icon" title="Toggle Light/Dark Theme">
+          <svg id="theme-icon-dark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+          <svg id="theme-icon-light" class="hidden" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+        </button>
+        <button id="btn-fullscreen" class="btn-icon" title="Toggle Fullscreen (F11 / Esc to exit)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+        </button>
+        <button id="btn-spell" class="btn-icon active" title="Toggle Spell &amp; Grammar Check (F7)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path><path d="M3 20l1.5-1.5"></path></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+  <button id="btn-exit-fullscreen" class="fullscreen-exit-btn" title="Exit Fullscreen (Esc)">✕ Exit Fullscreen (Esc)</button>
+  <!-- Formatting Toolbar -->
+  <nav class="format-toolbar">
+    <button class="fmt-btn" data-fmt="h1" title="Heading 1">H1</button>
+    <button class="fmt-btn" data-fmt="h2" title="Heading 2">H2</button>
+    <button class="fmt-btn" data-fmt="h3" title="Heading 3">H3</button>
+    <span class="fmt-sep"></span>
+    <button class="fmt-btn" data-fmt="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+    <button class="fmt-btn" data-fmt="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+    <button class="fmt-btn" data-fmt="strike" title="Strikethrough (GFM)">~S~</button>
+    <span class="fmt-sep"></span>
+    <button class="fmt-btn" data-fmt="code" title="Inline Code">`code`</button>
+    <button class="fmt-btn" data-fmt="codeblock" title="Code Block">```</button>
+    <button class="fmt-btn" data-fmt="quote" title="Quote">&ldquo;</button>
+    <button class="fmt-btn" data-fmt="link" title="Link (Ctrl+K)">Link</button>
+    <span class="fmt-sep"></span>
+    <button class="fmt-btn" data-fmt="ul" title="Bullet List">&bull; List</button>
+    <button class="fmt-btn" data-fmt="task" title="Task List (GFM)">&#9745; Task</button>
+    <button class="fmt-btn" data-fmt="table" title="Table (GFM)">Table</button>
+    <button class="fmt-btn" data-fmt="math" title="Math Expression">$f(x)$</button>
+    <span class="fmt-sep"></span>
+    <button id="btn-settings" class="fmt-btn" title="Parser & Extension Settings">&#9881; Options</button>
+  </nav>
+
+  <!-- Main Workspace -->
+  <main class="workspace" id="workspace">
+    <!-- Editor Pane -->
+    <section class="pane editor-pane" id="editor-pane">
+      <div class="pane-header">
+        <span class="pane-title">SOURCE</span>
+        <div class="pane-actions">
+          <label class="toggle-label" title="Synchronize scrolling between editor and viewer">
+            <input type="checkbox" id="sync-scroll-chk" checked>
+            <span>Sync Scroll</span>
+          </label>
+        </div>
+      </div>
+      <div class="editor-container">
+        <div class="editor-highlight" id="editor-highlight" aria-hidden="true"></div>
+        <textarea id="markdown-input" spellcheck="false" placeholder="Write markdown here... (CommonMark, GFM, Math, Frontmatter)"></textarea>
+      </div>
+    </section>
+
+    <!-- Preview Pane -->
+    <section class="pane preview-pane" id="preview-pane">
+      <div class="pane-header">
+        <span class="pane-title">RENDERED (markdown-rs)</span>
+        <span class="engine-badge" title="Compiled with wooorm/markdown-rs">Rust Engine</span>
+      </div>
+      <div class="preview-scroll-wrapper" id="preview-wrapper">
+        <article class="markdown-body" id="preview-output"></article>
+      </div>
+    </section>
+
+    <!-- Table of Contents Drawer -->
+    <aside class="side-drawer" id="toc-drawer">
+      <div class="drawer-header">
+        <h3>Outline</h3>
+        <button id="close-toc" class="btn-close">&times;</button>
+      </div>
+      <div class="drawer-body" id="toc-list">
+        <p class="empty-state">No headings found</p>
+      </div>
+    </aside>
+
+    <!-- AST Inspector Drawer -->
+    <aside class="side-drawer ast-drawer" id="ast-drawer">
+      <div class="drawer-header">
+        <div class="drawer-title-group">
+          <h3>markdown-rs AST</h3>
+          <span class="badge">mdast</span>
+        </div>
+        <button id="close-ast" class="btn-close">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <div class="ast-meta">
+          <span>Abstract Syntax Tree generated by <code>markdown::to_mdast</code></span>
+          <button id="copy-ast" class="btn btn-sm">Copy JSON</button>
+        </div>
+        <pre><code id="ast-output">// Loading AST...</code></pre>
+      </div>
+    </aside>
+
+    <!-- Proofreading Drawer -->
+    <aside class="side-drawer spell-drawer" id="spell-drawer">
+      <div class="drawer-header">
+        <div class="drawer-title-group">
+          <h3>Proofread</h3>
+          <span class="badge" id="spell-badge">0</span>
+        </div>
+        <button id="close-spell" class="btn-close">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <div class="ast-meta">
+          <label class="toggle-label" title="Choose spelling dictionary">
+            Variant
+            <select id="spell-locale" class="spell-select">
+              <option value="en-us">English (US)</option>
+              <option value="en-gb">English (UK)</option>
+            </select>
+          </label>
+          <button id="btn-recheck" class="btn btn-sm">Recheck</button>
+        </div>
+        <div id="spell-list" class="spell-list">
+          <p class="empty-state">No issues found</p>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Options Modal -->
+  <div class="modal-overlay hidden" id="settings-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>markdown-rs Settings</h3>
+        <button id="close-settings" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-item">
+          <div>
+            <div class="setting-title">GitHub Flavored Markdown (GFM)</div>
+            <div class="setting-desc">Enables tables, tasklists, autolinks, strikethrough, and footnotes</div>
+          </div>
+          <input type="checkbox" id="cfg-gfm" checked>
+        </div>
+        <div class="setting-item">
+          <div>
+            <div class="setting-title">Math Expressions</div>
+            <div class="setting-desc">Enables math flow and text tokens ($x^2$, $$\sum$$)</div>
+          </div>
+          <input type="checkbox" id="cfg-math" checked>
+        </div>
+        <div class="setting-item">
+          <div>
+            <div class="setting-title">YAML Frontmatter</div>
+            <div class="setting-desc">Parses frontmatter metadata blocks at document root</div>
+          </div>
+          <input type="checkbox" id="cfg-frontmatter" checked>
+        </div>
+        <div class="setting-item">
+          <div>
+            <div class="setting-title">Allow HTML Elements</div>
+            <div class="setting-desc">Permits raw HTML passthrough in markdown document</div>
+          </div>
+          <input type="checkbox" id="cfg-html" checked>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-save-settings" class="btn btn-primary">Apply Options</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <footer class="status-bar">
+    <div class="status-left">
+      <span class="status-item"><strong id="stat-words">0</strong> words</span>
+      <span class="status-item"><strong id="stat-chars">0</strong> chars</span>
+      <span class="status-item"><strong id="stat-time">0m</strong> read</span>
+      <span class="status-item" id="stat-lines">Ln 1, Col 1</span>
+      <span class="status-item" id="stat-zoom" title="Zoom (Cmd/Ctrl +/-)">100%</span>
+    </div>
+    <div class="status-right">
+      <span class="status-item engine-info">Powered by <strong>wooorm/markdown-rs</strong> + <strong>Tauri</strong></span>
+    </div>
+  </footer>
+
+  <script src="vendor/katex/katex.min.js"></script>
+  <script src="vendor/katex/contrib/auto-render.min.js"></script>
+  <script src="vendor/mermaid/mermaid.min.js"></script>
+  <script src="vendor/spell/spell.min.js"></script>
+  <script src="vendor/viz/viz-global.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
