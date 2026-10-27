@@ -273,6 +273,22 @@ pub mod commands {
         let _ = app.asset_protocol_scope().allow_file(&p);
     }
 
+    /// Last-modified time in milliseconds since the Unix epoch.
+    #[tauri::command]
+    pub fn file_modified_time(path: String) -> Result<u64, String> {
+        let meta = fs::metadata(&path).map_err(|err| format!("stat {}: {}", path, err))?;
+        let modified = meta.modified().map_err(|err| format!("mtime {}: {}", path, err))?;
+        Ok(modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0))
+    }
+
+    #[tauri::command]
+    pub fn read_text_file(path: String) -> Result<String, String> {
+        fs::read_to_string(&path).map_err(|err| format!("Failed to read {}: {}", path, err))
+    }
+
     #[tauri::command]
     pub fn get_initial_file(state: tauri::State<AppState>) -> Result<Option<FilePayload>, String> {
         let initial = state.initial_file.lock().map_err(|e| e.to_string())?;
@@ -438,7 +454,9 @@ pub fn run() {
             commands::get_initial_file,
             commands::export_html,
             commands::exit_app,
-            commands::allow_document_dir
+            commands::allow_document_dir,
+            commands::file_modified_time,
+            commands::read_text_file
         ])
         .build(tauri::generate_context!())
         .expect("error while building Markie application");
@@ -482,5 +500,51 @@ mod tests {
         let md = "Inline math: $E = mc^2$ and $x$.\n\n$$\n\\sum_{i=1}^n x_i\n$$\n\n$$E = mc^2$$\n";
         let res = commands::render_markdown(md.to_string(), None).unwrap();
         println!("RENDERED HTML:\n{}", res.html);
+    }
+
+    #[test]
+    fn test_svg_passthrough() {
+        let md = "Inline <svg viewBox=\"0 0 10 10\"><circle r=\"5\"/></svg> text.\n\n<svg width=\"400\" height=\"200\" viewBox=\"0 0 400 200\"><rect width=\"400\" height=\"200\"/></svg>\n";
+        let res = commands::render_markdown(md.to_string(), None).unwrap();
+        println!("RENDERED SVG HTML:\n{}", res.html);
+        assert!(
+            res.html.contains("<svg"),
+            "raw inline/block SVG must pass through unescaped, got:\n{}",
+            res.html
+        );
+        assert!(
+            !res.html.contains("&lt;svg"),
+            "raw SVG must not be HTML-escaped, got:\n{}",
+            res.html
+        );
+    }
+
+    #[test]
+    fn test_external_change_commands() {
+        let dir = std::env::temp_dir().join("markie-external-change-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("doc.md");
+        fs::write(&file, "one").unwrap();
+        let path = file.to_string_lossy().to_string();
+
+        let first = commands::file_modified_time(path.clone()).unwrap();
+        assert_eq!(commands::read_text_file(path.clone()).unwrap(), "one");
+
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        fs::write(&file, "two").unwrap();
+
+        let second = commands::file_modified_time(path.clone()).unwrap();
+        assert!(
+            second > first,
+            "mtime must advance after an external write ({first} -> {second})"
+        );
+        assert_eq!(commands::read_text_file(path.clone()).unwrap(), "two");
+
+        // Reading a path that no longer exists is an error, not a panic.
+        fs::remove_file(&file).unwrap();
+        assert!(commands::file_modified_time(path).is_err());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

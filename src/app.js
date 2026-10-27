@@ -96,6 +96,146 @@ digraph G {
 > **Note:** Markdown gives you total clarity. Markie keeps your focus where it belongs.
 `;
 
+// ─── Tab Engine ──────────────────────────────────────────────────────────────
+let tabIdSeq = 0;
+function makeTab(overrides = {}) {
+  return {
+    id: ++tabIdSeq,
+    path: null,
+    name: "Untitled.md",
+    content: "",
+    isModified: false,
+    cursorPos: 0,
+    scrollTop: 0,
+    ...overrides
+  };
+}
+
+const tabs = { list: [], activeId: null };
+
+function saveTabs() {
+  try {
+    const data = tabs.list.map(t => ({
+      id: t.id,
+      path: t.path,
+      name: t.name,
+      content: t.content,
+      isModified: t.isModified,
+      cursorPos: t.cursorPos,
+      scrollTop: t.scrollTop
+    }));
+    localStorage.setItem("markie.tabs", JSON.stringify({ tabs: data, activeId: tabs.activeId }));
+  } catch (_) {}
+}
+
+function loadTabsFromStorage() {
+  try {
+    const raw = localStorage.getItem("markie.tabs");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed.tabs) || parsed.tabs.length === 0) return null;
+    return parsed;
+  } catch (_) { return null; }
+}
+
+function activeTab() {
+  return tabs.list.find(t => t.id === tabs.activeId) || null;
+}
+
+function snapshotActiveTab() {
+  const t = activeTab();
+  if (!t) return;
+  t.content = editor.value;
+  t.cursorPos = editor.selectionStart;
+  t.scrollTop = editor.scrollTop;
+  t.isModified = state.isModified;
+  t.path = state.currentPath;
+  t.name = state.currentName;
+}
+
+function renderTabBar() {
+  const tabList = document.getElementById("tab-list");
+  if (!tabList) return;
+  tabList.innerHTML = tabs.list.map(t => {
+    const active = t.id === tabs.activeId ? " active" : "";
+    const modified = t.isModified ? " modified" : "";
+    const dot = t.isModified ? "<span class=\"tab-dot\"></span>" : "";
+    return `<div class="tab-item${active}${modified}" data-tab-id="${t.id}" title="${escapeHtml(t.path || t.name)}">
+      <span class="tab-name">${escapeHtml(t.name)}</span>${dot}
+      <button class="tab-close" data-tab-id="${t.id}" title="Close tab">×</button>
+    </div>`;
+  }).join("");
+}
+
+function switchToTab(id) {
+  snapshotActiveTab();
+  tabs.activeId = id;
+  const t = activeTab();
+  if (!t) return;
+  editor.value = t.content;
+  state.currentPath = t.path;
+  state.currentName = t.name;
+  state.isModified = t.isModified;
+  docTitle.textContent = t.name;
+  saveStatus.textContent = t.isModified ? "Edited" : "Saved";
+  saveStatus.className = "save-status " + (t.isModified ? "unsaved" : "saved");
+  requestAnimationFrame(() => {
+    editor.scrollTop = t.scrollTop;
+    editor.selectionStart = editor.selectionEnd = t.cursorPos;
+  });
+  renderTabBar();
+  saveTabs();
+  updateRender(true);
+  updateCursorPos();
+}
+
+function newTab(overrides = {}) {
+  snapshotActiveTab();
+  const t = makeTab(overrides);
+  tabs.list.push(t);
+  // activeId is set by switchToTab; setting it here would make switchToTab's
+  // snapshot copy the old editor content into this brand-new tab
+  switchToTab(t.id);
+  return t;
+}
+
+function closeTab(id) {
+  const idx = tabs.list.findIndex(t => t.id === id);
+  if (idx === -1) return;
+  const t = tabs.list[idx];
+  if (t.isModified && !confirm(`Close "${t.name}" without saving?`)) return;
+  tabs.list.splice(idx, 1);
+  if (tabs.list.length === 0) {
+    newTab({ content: DEFAULT_MARKDOWN });
+    return;
+  }
+  if (tabs.activeId === id) {
+    const next = tabs.list[Math.min(idx, tabs.list.length - 1)];
+    switchToTab(next.id);
+  } else {
+    renderTabBar();
+    saveTabs();
+  }
+}
+
+// Wire tab bar clicks
+document.addEventListener("click", e => {
+  const closeBtn = e.target.closest(".tab-close");
+  if (closeBtn) {
+    e.stopPropagation();
+    closeTab(Number(closeBtn.dataset.tabId));
+    return;
+  }
+  const tabItem = e.target.closest(".tab-item");
+  if (tabItem) {
+    const id = Number(tabItem.dataset.tabId);
+    if (id !== tabs.activeId) switchToTab(id);
+  }
+});
+
+document.getElementById("btn-new-tab")?.addEventListener("click", () => newTab());
+// ──────────────────────────────────────────────────────────────────────────────
+
 // Application State
 const state = {
   currentPath: null,
@@ -105,10 +245,10 @@ const state = {
   isFullscreen: false,
   preFullscreenViewMode: "split",
   fontScale: 1,
-  spellEnabled: true,
   spellLocale: "en-us",
   spellReady: false,
   spellIssues: [],
+  fileMtime: 0,
   syncScroll: true,
   isScrollingEditor: false,
   isScrollingPreview: false,
@@ -147,7 +287,6 @@ const spellBadge = document.getElementById("spell-badge");
 const spellLocaleSel = document.getElementById("spell-locale");
 const btnSpell = document.getElementById("btn-spell");
 const editorPane = document.getElementById("editor-pane");
-const editorHighlight = document.getElementById("editor-highlight");
 // Dynamic Tauri Invoke Resolution
 function getTauriInvoke() {
   if (typeof window !== "undefined") {
@@ -323,6 +462,8 @@ function parseMarkdownClient(md) {
 let renderDebounceTimer = null;
 function queueRender() {
   markUnsaved();
+  const t = activeTab();
+  if (t) { t.content = editor.value; t.cursorPos = editor.selectionStart; }
   clearTimeout(renderDebounceTimer);
   // Scale debounce with document size so large files stay responsive
   const size = editor.value.length;
@@ -489,7 +630,6 @@ const spellEngine = window.MarkieSpell || null;
 let spellDictCache = {};
 let spellWorker = null;
 let spellReqId = 0;
-let lastOverlaySignature = "";
 
 function assetUrl(path) {
   return new URL(path, window.location.href).href;
@@ -559,7 +699,6 @@ function assembleSpellIssues(spelling, grammar) {
   }
   issues.sort((a, b) => a.start - b.start);
   state.spellIssues = issues;
-  renderSpellOverlay();
   renderSpellList();
 }
 
@@ -594,12 +733,6 @@ async function loadSpellDictionary(locale) {
 }
 
 function runSpellCheck() {
-  if (!state.spellEnabled) {
-    state.spellIssues = [];
-    renderSpellOverlay();
-    renderSpellList();
-    return;
-  }
   const worker = ensureSpellWorker();
   if (!worker) {
     runSpellCheckOnMainThread();
@@ -633,48 +766,10 @@ function escapeHtmlText(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function renderSpellOverlay() {
-  if (!editorHighlight) return;
-  const issues = state.spellIssues;
-  if (!state.spellEnabled || issues.length === 0) {
-    if (lastOverlaySignature !== "") {
-      editorHighlight.innerHTML = "";
-      lastOverlaySignature = "";
-    }
-    return;
-  }
-
-  const signature = `${editor.value.length}:${issues.length}:${issues.map(i => `${i.start}-${i.end}${i.kind[0]}`).join(",")}`;
-  if (signature === lastOverlaySignature) return;
-  lastOverlaySignature = signature;
-
-  const text = editor.value;
-  const parts = [];
-  let cursor = 0;
-  const visible = issues.filter(i => i.end > i.start).slice(0, 2000);
-  for (const issue of visible) {
-    const s = Math.max(cursor, Math.min(issue.start, text.length));
-    const e = Math.max(s, Math.min(issue.end, text.length));
-    if (s > cursor) parts.push(escapeHtmlText(text.slice(cursor, s)));
-    if (e > s) {
-      const cls = issue.kind === "spelling" ? "spell-mark-spelling" : "spell-mark-grammar";
-      parts.push(`<mark class="${cls}">${escapeHtmlText(text.slice(s, e))}</mark>`);
-    }
-    cursor = e;
-  }
-  if (cursor < text.length) parts.push(escapeHtmlText(text.slice(cursor)));
-  parts.push("\n");
-  editorHighlight.innerHTML = parts.join("");
-}
-
 function renderSpellList() {
   if (!spellList) return;
   const issues = state.spellIssues;
   if (spellBadge) spellBadge.textContent = String(issues.length);
-  if (!state.spellEnabled) {
-    spellList.innerHTML = `<p class="empty-state">Proofreading off</p>`;
-    return;
-  }
   if (issues.length === 0) {
     spellList.innerHTML = `<p class="empty-state">Press <kbd>F7</kbd> to check this document</p>`;
     return;
@@ -709,16 +804,54 @@ function applySuggestion(idx, word) {
   queueRender();
 }
 
-function toggleProofreading() {
-  state.spellEnabled = !state.spellEnabled;
-  if (btnSpell) btnSpell.classList.toggle("active", state.spellEnabled);
-  try { localStorage.setItem("markie.spellEnabled", state.spellEnabled ? "1" : "0"); } catch (_) {}
-  if (!state.spellEnabled) {
-    state.spellIssues = [];
-    lastOverlaySignature = "";
-    renderSpellOverlay();
-    renderSpellList();
+// External change detection: poll the open file's mtime and reload when it
+// changes on disk, unless there are unsaved edits here.
+const FILE_POLL_MS = 1000;
+let fileWatchTimer = null;
+
+async function syncFileMtime() {
+  if (!state.currentPath) {
+    state.fileMtime = 0;
+    return;
   }
+  try {
+    state.fileMtime = await invoke("file_modified_time", { path: state.currentPath });
+  } catch (_) {
+    state.fileMtime = 0;
+  }
+}
+
+function startFileWatch() {
+  if (fileWatchTimer) return;
+  fileWatchTimer = setInterval(pollExternalChange, FILE_POLL_MS);
+}
+
+async function pollExternalChange() {
+  const path = state.currentPath;
+  if (!path) return;
+  let mtime;
+  try {
+    mtime = await invoke("file_modified_time", { path });
+  } catch (_) {
+    return;
+  }
+  if (!mtime || mtime === state.fileMtime) return;
+
+  if (state.isModified) {
+    // Don't clobber unsaved edits; surface the conflict instead.
+    saveStatus.textContent = "Changed on disk";
+    saveStatus.className = "save-status unsaved";
+    return;
+  }
+
+  try {
+    const content = await invoke("read_text_file", { path });
+    state.fileMtime = mtime;
+    editor.value = content;
+    markSaved(path, state.currentName);
+    saveStatus.textContent = "Reloaded from disk";
+    updateRender(true);
+  } catch (_) {}
 }
 
 // Pre-initialize Graphviz in background immediately on load
@@ -820,9 +953,20 @@ function resolvePreviewImages() {
   });
 }
 
+// A paragraph whose only content is an image/SVG is a block figure; CSS can't
+// tell that from an inline one, since :only-child ignores text nodes.
+function markFigureBlocks() {
+  preview.querySelectorAll("img, svg").forEach((el) => {
+    const p = el.parentElement;
+    if (!p || p.tagName !== "P") return;
+    p.classList.toggle("figure-block", p.textContent.trim() === "");
+  });
+}
+
 // Interactive Task List Checkboxes inside Preview
 function attachPreviewInteractivity() {
   resolvePreviewImages();
+  markFigureBlocks();
   const checkboxes = preview.querySelectorAll('input[type="checkbox"]');
   checkboxes.forEach((cb, index) => {
     cb.removeAttribute("disabled");
@@ -857,10 +1001,6 @@ function toggleMarkdownCheckbox(targetIndex, isChecked) {
 
 // Synchronized Scrolling
 editor.addEventListener("scroll", () => {
-  if (editorHighlight) {
-    editorHighlight.scrollTop = editor.scrollTop;
-    editorHighlight.scrollLeft = editor.scrollLeft;
-  }
   if (!state.syncScroll || state.isScrollingPreview) return;
   state.isScrollingEditor = true;
 
@@ -908,11 +1048,19 @@ function markSaved(path, name) {
   docTitle.textContent = state.currentName;
   saveStatus.textContent = "Saved";
   saveStatus.className = "save-status saved";
-  // Grant the asset protocol read access next to this document so local
-  // images resolve. Fire-and-forget: no-op in browser fallback.
+  const t = activeTab();
+  if (t) {
+    t.isModified = false;
+    t.path = state.currentPath;
+    t.name = state.currentName;
+    t.content = editor.value;
+  }
+  renderTabBar();
+  saveTabs();
   if (path) {
     invoke("allow_document_dir", { path }).catch(() => {});
   }
+  syncFileMtime();
 }
 
 function markUnsaved() {
@@ -920,18 +1068,15 @@ function markUnsaved() {
     state.isModified = true;
     saveStatus.textContent = "Edited";
     saveStatus.className = "save-status unsaved";
+    const t = activeTab();
+    if (t) t.isModified = true;
+    renderTabBar();
   }
 }
 
 // File Operations
 async function handleNew() {
-  if (state.isModified && !confirm("Discard unsaved changes?")) return;
-  editor.value = "";
-  state.currentPath = null;
-  state.currentName = "Untitled.md";
-  docTitle.textContent = "Untitled.md";
-  markSaved(null, "Untitled.md");
-  updateRender(true);
+  newTab();
   editor.focus();
 }
 
@@ -939,9 +1084,14 @@ async function handleOpen() {
   try {
     const result = await invoke("open_file");
     if (result) {
-      editor.value = result.content;
-      markSaved(result.path, result.name);
-      updateRender(true);
+      // reuse active tab if empty+unmodified, else open a new one
+      const t = activeTab();
+      if (t && !t.isModified && !t.path && t.content === "") {
+        loadFilePayload(result);
+      } else {
+        newTab({ path: result.path, name: result.name, content: result.content });
+        loadFilePayload(result);
+      }
     }
   } catch (err) {
     alert("Open file failed: " + err);
@@ -1169,6 +1319,30 @@ window.addEventListener("keydown", e => {
   const ctrl = e.ctrlKey || e.metaKey;
   const key = e.key.toLowerCase();
 
+  // New Tab: Cmd+T
+  if (ctrl && key === "t") {
+    e.preventDefault();
+    newTab();
+    return;
+  }
+
+  // Close Tab: Cmd+W
+  if (ctrl && key === "w") {
+    e.preventDefault();
+    if (tabs.activeId !== null) closeTab(tabs.activeId);
+    return;
+  }
+
+  // Switch tabs: Cmd+1-9
+  if (ctrl && key >= "1" && key <= "9") {
+    const idx = parseInt(key) - 1;
+    if (idx < tabs.list.length) {
+      e.preventDefault();
+      switchToTab(tabs.list[idx].id);
+      return;
+    }
+  }
+
   // Quit: Cmd/Ctrl + Q
   if (ctrl && key === "q") {
     e.preventDefault();
@@ -1294,10 +1468,11 @@ window.addEventListener("keydown", e => {
     return;
   }
 
-  // Toggle proofreading: Cmd/Ctrl + Shift + P
+  // Toggle proofreading drawer: Cmd/Ctrl + Shift + P
   if (ctrl && e.shiftKey && key === "p") {
     e.preventDefault();
-    toggleProofreading();
+    toggleDrawer(spellDrawer);
+    if (spellDrawer.classList.contains("open")) runSpellCheck();
     return;
   }
 
@@ -1330,7 +1505,10 @@ editor.addEventListener("input", () => {
   queueRender();
 });
 
-document.getElementById("btn-spell").addEventListener("click", () => toggleDrawer(spellDrawer));
+document.getElementById("btn-spell").addEventListener("click", () => {
+  toggleDrawer(spellDrawer);
+  if (spellDrawer.classList.contains("open")) runSpellCheck();
+});
 document.getElementById("close-spell").addEventListener("click", () => spellDrawer.classList.remove("open"));
 document.getElementById("btn-recheck").addEventListener("click", runSpellCheck);
 spellLocaleSel.addEventListener("change", async (e) => {
@@ -1385,6 +1563,12 @@ document.querySelectorAll(".fmt-btn[data-fmt]").forEach(btn => {
   });
 });
 
+// Save tabs on editor scroll so scrollTop persists
+editor.addEventListener("scroll", () => {
+  const t = activeTab();
+  if (t) t.scrollTop = editor.scrollTop;
+}, { passive: true });
+
 // Sync Scroll Checkbox
 document.getElementById("sync-scroll-chk").addEventListener("change", e => {
   state.syncScroll = e.target.checked;
@@ -1431,6 +1615,10 @@ function loadFilePayload(file) {
   markSaved(file.path, file.name);
   updateRender(true);
   updateCursorPos();
+  // keep tab content in sync immediately
+  const t = activeTab();
+  if (t) t.content = file.content;
+  saveTabs();
 }
 
 async function setupFileOpenListener() {
@@ -1438,7 +1626,12 @@ async function setupFileOpenListener() {
   if (typeof listen === "function") {
     try {
       await listen("open-file", (event) => {
-        loadFilePayload(event.payload);
+        // OS file-open event: open in a new tab
+        const file = event.payload;
+        if (file && file.content !== undefined) {
+          newTab({ path: file.path, name: file.name, content: file.content });
+          loadFilePayload(file);
+        }
       });
     } catch (err) {
       console.warn("Failed to listen for open-file events:", err);
@@ -1456,26 +1649,64 @@ async function initDocument() {
       state.spellLocale = savedLocale;
       if (spellLocaleSel) spellLocaleSel.value = savedLocale;
     }
-    const savedEnabled = localStorage.getItem("markie.spellEnabled");
-    if (savedEnabled === "0") {
-      state.spellEnabled = false;
-      if (btnSpell) btnSpell.classList.remove("active");
-    }
   } catch (_) {}
 
+  startFileWatch();
   await setupFileOpenListener();
+
+  // CLI / OS file-open takes priority over restored session
   try {
     const file = await invoke("get_initial_file");
     if (file && file.content !== undefined) {
+      const t = makeTab({ path: file.path, name: file.name, content: file.content });
+      tabs.list.push(t);
+      tabs.activeId = t.id;
       loadFilePayload(file);
+      renderTabBar();
       return;
     }
   } catch (err) {
     console.warn("get_initial_file error:", err);
   }
 
+  // Restore previous session tabs
+  const saved = loadTabsFromStorage();
+  if (saved) {
+    // re-assign ids to avoid collisions, remembering the old->new mapping
+    let restoredActiveId = null;
+    saved.tabs.forEach(t => {
+      const oldId = t.id;
+      t.id = ++tabIdSeq;
+      if (String(oldId) === String(saved.activeId)) restoredActiveId = t.id;
+      tabs.list.push(t);
+    });
+    const restoredActive = tabs.list.find(t => t.id === restoredActiveId)
+      || tabs.list[tabs.list.length - 1];
+    tabs.activeId = restoredActive.id;
+    editor.value = restoredActive.content;
+    state.currentPath = restoredActive.path;
+    state.currentName = restoredActive.name;
+    state.isModified = restoredActive.isModified;
+    docTitle.textContent = restoredActive.name;
+    saveStatus.textContent = restoredActive.isModified ? "Edited" : "Saved";
+    saveStatus.className = "save-status " + (restoredActive.isModified ? "unsaved" : "saved");
+    requestAnimationFrame(() => {
+      editor.scrollTop = restoredActive.scrollTop || 0;
+      editor.selectionStart = editor.selectionEnd = restoredActive.cursorPos || 0;
+    });
+    renderTabBar();
+    updateRender(true);
+    updateCursorPos();
+    return;
+  }
+
+  // Fresh start
+  const t = makeTab({ content: DEFAULT_MARKDOWN });
+  tabs.list.push(t);
+  tabs.activeId = t.id;
   editor.value = DEFAULT_MARKDOWN;
   markSaved(null, "Untitled.md");
+  renderTabBar();
   updateRender(true);
   updateCursorPos();
 }
@@ -1489,8 +1720,13 @@ window.addEventListener("drop", async e => {
   if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
     const file = e.dataTransfer.files[0];
     const text = await file.text();
-    editor.value = text;
-    markSaved(file.path || file.name, file.name);
+    const t = activeTab();
+    if (t && !t.isModified && !t.path && t.content === "") {
+      editor.value = text;
+      markSaved(file.path || file.name, file.name);
+    } else {
+      newTab({ path: file.path || null, name: file.name, content: text });
+    }
     updateRender(true);
     updateCursorPos();
   }
