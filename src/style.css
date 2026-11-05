@@ -22,6 +22,20 @@
   --blockquote-border: #30363d;
   --highlight-bg: #ffe95433;
 
+  /* Editor syntax highlighting */
+  --md-heading: #79c0ff;
+  --md-code: #ffa657;
+  --md-link: #58a6ff;
+  --md-math: #d2a8ff;
+  --md-quote: #8b949e;
+  --md-list: #7ee787;
+  --md-mark: #484f58;
+  --md-frontmatter: #6e7681;
+  --md-fence: #8b949e;
+  --md-codeblock: #a5d6ff;
+  --find-bg: rgba(187, 128, 9, 0.45);
+  --find-current-bg: #d29922;
+
   /* Content zoom (Cmd/Ctrl +/-) */
   --content-font-scale: 1;
 }
@@ -45,6 +59,19 @@ body.theme-light {
   --table-zebra: #f6f8fa;
   --blockquote-border: #d0d7de;
   --highlight-bg: #fff8c5;
+
+  --md-heading: #0550ae;
+  --md-code: #953800;
+  --md-link: #0969da;
+  --md-math: #8250df;
+  --md-quote: #656d76;
+  --md-list: #1a7f37;
+  --md-mark: #8c959f;
+  --md-frontmatter: #6e7681;
+  --md-fence: #656d76;
+  --md-codeblock: #0a3069;
+  --find-bg: rgba(210, 153, 34, 0.35);
+  --find-current-bg: #f2cc60;
 }
 
 * {
@@ -1132,4 +1159,178 @@ body.theme-dark .graphviz-container svg path[fill="#ffffff"] {
 .tab-new-btn:hover {
   background-color: var(--bg-surface-hover);
   color: var(--text-main);
+}
+
+/* ─── Editor Syntax Highlight Overlay ──────────────────────────────────────── */
+/* The textarea keeps all editing behaviour; a mirrored <pre> behind it paints
+   the colours, and the textarea's own glyphs are made transparent. */
+.editor-container {
+  position: relative;
+}
+
+#markdown-input {
+  position: relative;
+  z-index: 2;
+}
+
+.editor-highlight {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  background-color: var(--bg-surface);
+}
+
+#highlight-code {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 16px;
+  min-width: 100%;
+  font-family: var(--font-mono);
+  font-size: calc(14px * var(--content-font-scale));
+  line-height: 1.6;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  color: var(--text-main);
+  will-change: transform;
+}
+
+.editor-container.hl-on #markdown-input {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text-main);
+}
+
+.editor-container.hl-on #markdown-input::placeholder {
+  -webkit-text-fill-color: var(--text-dim);
+}
+
+.editor-container.hl-on #markdown-input::selection {
+  background-color: rgba(47, 129, 247, 0.35);
+}
+
+.md-heading { color: var(--md-heading); font-weight: 700; }
+.md-bold { color: var(--text-main); font-weight: 700; }
+.md-italic { color: var(--text-main); font-style: italic; }
+.md-strike { color: var(--text-muted); text-decoration: line-through; }
+.md-code { color: var(--md-code); }
+.md-link { color: var(--md-link); }
+.md-math { color: var(--md-math); }
+.md-quote { color: var(--md-quote); font-style: italic; }
+.md-list-marker { color: var(--md-list); font-weight: 700; }
+.md-mark { color: var(--md-mark); }
+.md-frontmatter { color: var(--md-frontmatter); font-style: italic; }
+.md-fence { color: var(--md-fence); font-weight: 700; }
+.md-codeblock-text { color: var(--md-codeblock); }
+.md-table { color: var(--text-main); }
+.md-hr { color: var(--md-mark); }
+
+.md-find {
+  background-color: var(--find-bg);
+  border-radius: 2px;
+  color: var(--text-main);
+}
+
+.md-find-current {
+  background-color: var(--find-current-bg);
+  color: #0d1117;
+}
+
+/* ─── Find & Replace Bar ───────────────────────────────────────────────────── */
+.find-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 6px 8px;
+  background-color: var(--bg-app);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+}
+
+.find-bar.find-error #find-input {
+  border-color: #f85149;
+  box-shadow: 0 0 0 1px rgba(248, 81, 73, 0.35);
+}
+
+.find-field {
+  min-width: 64px;
+  width: 150px;
+  flex: 0 1 150px;
+  padding: 3px 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-main);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  outline: none;
+}
+
+.find-field:focus {
+  border-color: var(--accent-blue);
+}
+
+.find-count {
+  min-width: 52px;
+  padding: 0 2px;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.find-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.find-btn:hover {
+  background-color: var(--bg-surface-hover);
+  color: var(--text-main);
+}
+
+.find-close {
+  margin-left: auto;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.find-sep {
+  width: 1px;
+  height: 16px;
+  background-color: var(--border-color);
+}
+
+.find-opt {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.find-opt input {
+  width: 10px;
+  height: 10px;
+  margin: 0;
+  cursor: pointer;
 }

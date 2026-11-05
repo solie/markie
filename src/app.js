@@ -471,6 +471,408 @@ function queueRender() {
   renderDebounceTimer = setTimeout(updateRender, delay);
 }
 
+// ─── Editor Syntax Highlighting (textarea overlay) ───────────────────────────
+// A <textarea> cannot style its own text, so a mirrored <pre> is painted behind
+// it with identical metrics while the textarea's glyphs are made transparent.
+// Editing, selection, undo, IME and save all keep working on the real textarea.
+
+const editorContainer = document.querySelector(".editor-container");
+const hlLayer = document.getElementById("editor-highlight");
+const hlCode = document.getElementById("highlight-code");
+
+const HL_MAX_LENGTH = 300000; // above this, plain text beats jank
+const HL_SYNC_LIMIT = 20000;  // above this, highlight on the next frame
+const HL_PAD = 16;
+
+function hlEscape(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Ordered: the first matching token nearest the cursor wins. Inline code is
+// first so its contents are never re-tokenized.
+const HL_RULES = [
+  {
+    re: /(`+)([^`\n]*?)\1/g,
+    render: m => `<span class="md-code">${hlEscape(m[0])}</span>`
+  },
+  {
+    re: /(!?)\[([^\]\n]*)\]\(([^)\n]*)\)/g,
+    render: (m, d) => `<span class="md-link">${hlEscape(m[1])}[${hlInline(m[2], d + 1)}](${hlEscape(m[3])})</span>`
+  },
+  {
+    re: /\$\$([^$\n]+)\$\$|\$([^$\n]+)\$/g,
+    render: m => `<span class="md-math">${hlEscape(m[0])}</span>`
+  },
+  {
+    re: /(\*\*|__)(?=\S)([^\n]*?\S)\1/g,
+    render: (m, d) => `<span class="md-bold">${hlEscape(m[1])}${hlInline(m[2], d + 1)}${hlEscape(m[1])}</span>`
+  },
+  {
+    re: /~~(?=\S)([^~\n]*?\S)~~/g,
+    render: (m, d) => `<span class="md-strike">~~${hlInline(m[1], d + 1)}~~</span>`
+  },
+  {
+    re: /(?<![*\w])([*_])(?=\S)([^*_\n]*?\S)\1(?![*\w])/g,
+    render: (m, d) => `<span class="md-italic">${hlEscape(m[1])}${hlInline(m[2], d + 1)}${hlEscape(m[1])}</span>`
+  }
+];
+
+function hlInline(text, depth = 0) {
+  if (!text) return "";
+  if (depth > 3) return hlEscape(text);
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    let best = null;
+    for (const rule of HL_RULES) {
+      rule.re.lastIndex = i;
+      const m = rule.re.exec(text);
+      if (!m || m[0].length === 0) continue;
+      if (!best || m.index < best.m.index) best = { rule, m };
+    }
+    if (!best) {
+      out += hlEscape(text.slice(i));
+      break;
+    }
+    if (best.m.index > i) out += hlEscape(text.slice(i, best.m.index));
+    out += best.rule.render(best.m, depth);
+    i = best.m.index + best.m[0].length;
+  }
+  return out;
+}
+
+function hlBlocks(text) {
+  const lines = text.split("\n");
+  let out = "";
+  let fence = null;
+  let inFrontmatter = false;
+
+  for (let n = 0; n < lines.length; n++) {
+    const line = lines[n];
+    let html;
+
+    if (fence) {
+      if (line.trim().startsWith(fence)) {
+        fence = null;
+        html = `<span class="md-fence">${hlEscape(line)}</span>`;
+      } else {
+        html = `<span class="md-codeblock-text">${hlEscape(line)}</span>`;
+      }
+    } else if (n === 0 && line.trim() === "---") {
+      inFrontmatter = true;
+      html = `<span class="md-frontmatter">${hlEscape(line)}</span>`;
+    } else if (inFrontmatter) {
+      if (line.trim() === "---" || line.trim() === "...") inFrontmatter = false;
+      html = `<span class="md-frontmatter">${hlEscape(line)}</span>`;
+    } else {
+      const fenceMatch = /^(\s*)(`{3,}|~{3,})(.*)$/.exec(line);
+      const heading = /^(\s*)(#{1,6})(\s+)(.*)$/.exec(line);
+      const headingBare = /^(\s*)(#{1,6})\s*$/.exec(line);
+      const quote = /^(\s*)(>+\s?)(.*)$/.exec(line);
+      const list = /^(\s*)([-*+]|\d+[.)])(\s+)(.*)$/.exec(line);
+
+      if (fenceMatch) {
+        fence = fenceMatch[2];
+        html = `<span class="md-fence">${hlEscape(line)}</span>`;
+      } else if (heading) {
+        html = `<span class="md-heading">${hlEscape(heading[1] + heading[2] + heading[3])}${hlInline(heading[4])}</span>`;
+      } else if (headingBare) {
+        html = `<span class="md-heading">${hlEscape(line)}</span>`;
+      } else if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
+        html = `<span class="md-hr">${hlEscape(line)}</span>`;
+      } else if (quote) {
+        html = `<span class="md-quote">${hlEscape(quote[1])}</span><span class="md-mark">${hlEscape(quote[2])}</span>${hlInline(quote[3])}`;
+      } else if (list) {
+        const task = /^\[[ xX]\](\s+)(.*)$/.exec(list[4]);
+        const marker = `<span class="md-mark">${hlEscape(list[1])}</span><span class="md-list-marker">${hlEscape(list[2])}</span>`;
+        if (task) {
+          html = `${marker}<span class="md-mark">${hlEscape(list[3] + list[4].slice(0, list[4].indexOf("]") + 1))}${hlEscape(task[1])}</span>${hlInline(task[2])}`;
+        } else {
+          html = `${marker}${hlEscape(list[3])}${hlInline(list[4])}`;
+        }
+      } else if (/^\s*\|/.test(line)) {
+        html = `<span class="md-table">${hlInline(line)}</span>`;
+      } else {
+        html = hlInline(line);
+      }
+    }
+
+    out += html + (n < lines.length - 1 ? "\n" : "");
+  }
+  return out;
+}
+
+let hlLastText = null;
+let hlLastMode = "";
+let hlLastIndex = -2;
+let hlScheduled = false;
+
+function scheduleHighlight() {
+  // Small and medium documents highlight synchronously: tokenizing a few
+  // kilobytes costs about a millisecond and keeps the mirror from ever lagging
+  // behind a frame (background windows throttle requestAnimationFrame).
+  if (editor.value.length <= HL_SYNC_LIMIT) {
+    hlScheduled = false;
+    renderHighlight();
+    return;
+  }
+  if (hlScheduled) return;
+  hlScheduled = true;
+  requestAnimationFrame(() => {
+    hlScheduled = false;
+    renderHighlight();
+  });
+}
+
+function syncHighlightLayout() {
+  if (!hlCode) return;
+  // Match the textarea's text width when a non-overlay scrollbar takes space.
+  const gutter = Math.max(0, editor.offsetWidth - editor.clientWidth);
+  hlCode.style.paddingRight = `${HL_PAD + gutter}px`;
+  hlCode.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`;
+}
+
+function hlFindMarkup(text) {
+  const matches = findState.matches;
+  let out = "";
+  let last = 0;
+  for (let k = 0; k < matches.length; k++) {
+    const m = matches[k];
+    if (m.start < last) continue;
+    out += hlEscape(text.slice(last, m.start));
+    const cls = k === findState.index ? "md-find md-find-current" : "md-find";
+    out += `<span class="${cls}">${hlEscape(text.slice(m.start, Math.max(m.end, m.start)))}</span>`;
+    last = m.end;
+  }
+  return out + hlEscape(text.slice(last)) + "\n";
+}
+
+function renderHighlight(force = false) {
+  const text = editor.value;
+  const mode = findState.active ? "find" : "syntax";
+  if (!force && text === hlLastText && mode === hlLastMode && hlLastIndex === findState.index) return;
+  hlLastText = text;
+  hlLastMode = mode;
+  hlLastIndex = findState.index;
+
+  if (!hlCode || !hlLayer) return;
+
+  if (text.length > HL_MAX_LENGTH) {
+    editorContainer.classList.remove("hl-on");
+    hlCode.innerHTML = "";
+    return;
+  }
+
+  try {
+    hlCode.innerHTML = (mode === "find" ? hlFindMarkup(text) : hlBlocks(text) + "\n");
+    editorContainer.classList.add("hl-on");
+  } catch (err) {
+    // Never leave the user with invisible text.
+    console.warn("Syntax highlight failed:", err);
+    editorContainer.classList.remove("hl-on");
+    hlCode.innerHTML = "";
+    return;
+  }
+  syncHighlightLayout();
+}
+
+function scrollEditorToOffset(offset) {
+  const line = editor.value.slice(0, Math.max(0, offset)).split("\n").length - 1;
+  const lineHeight = parseFloat(getComputedStyle(editor).lineHeight) || 22;
+  const y = HL_PAD + line * lineHeight;
+  const top = editor.scrollTop;
+  const bottom = top + editor.clientHeight;
+  if (y < top + 8 || y > bottom - lineHeight * 2) {
+    editor.scrollTop = Math.max(0, y - editor.clientHeight / 2);
+  }
+}
+
+// ─── Find & Replace ─────────────────────────────────────────────────────────
+const findBar = document.getElementById("find-bar");
+const findInput = document.getElementById("find-input");
+const replaceInput = document.getElementById("replace-input");
+const findCount = document.getElementById("find-count");
+const findCaseChk = document.getElementById("find-case");
+const findRegexChk = document.getElementById("find-regex");
+
+const findState = { active: false, matches: [], index: -1, error: false };
+
+function findBuild() {
+  const query = findInput.value;
+  findState.matches = [];
+  findState.error = false;
+  if (!query) {
+    findState.index = -1;
+    findBar.classList.remove("find-error");
+    return;
+  }
+
+  let re;
+  try {
+    const body = findRegexChk.checked ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    re = new RegExp(body, findCaseChk.checked ? "g" : "gi");
+  } catch (_) {
+    findState.error = true;
+    findState.index = -1;
+    findBar.classList.add("find-error");
+    return;
+  }
+  findBar.classList.remove("find-error");
+
+  const src = editor.value;
+  let m;
+  let guard = 0;
+  while ((m = re.exec(src)) !== null) {
+    findState.matches.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+    if (m[0].length === 0) re.lastIndex++;
+    if (++guard > 50000) break;
+  }
+}
+
+function findRefresh(preserve = true, moveSelection = true, updateCount = true) {
+  const previousStart = preserve && findState.index >= 0 && findState.matches[findState.index]
+    ? findState.matches[findState.index].start
+    : null;
+  const anchor = previousStart !== null ? previousStart : editor.selectionStart;
+
+  findBuild();
+
+  if (!findState.matches.length) {
+    findState.index = -1;
+  } else {
+    const at = findState.matches.findIndex(m => m.start >= anchor);
+    if (at !== -1) findState.index = at;
+    else findState.index = previousStart !== null ? findState.matches.length - 1 : 0;
+  }
+
+  if (updateCount) {
+    findCount.textContent = findState.error
+      ? "!"
+      : (findState.matches.length ? `${findState.index + 1}/${findState.matches.length}` : "0/0");
+  }
+
+  renderHighlight(true);
+
+  if (moveSelection && findState.index >= 0) {
+    const m = findState.matches[findState.index];
+    editor.setSelectionRange(m.start, m.end);
+    scrollEditorToOffset(m.start);
+  }
+}
+
+function findStep(dir) {
+  if (!findState.matches.length) return;
+  const n = findState.matches.length;
+  findState.index = (findState.index + dir + n) % n;
+  findCount.textContent = `${findState.index + 1}/${n}`;
+  const m = findState.matches[findState.index];
+  editor.setSelectionRange(m.start, m.end);
+  scrollEditorToOffset(m.start);
+  renderHighlight(true);
+}
+
+function findExpand(matchedText) {
+  const replacement = replaceInput.value;
+  if (!findRegexChk.checked) return replacement;
+  try {
+    const re = new RegExp(findInput.value, findCaseChk.checked ? "" : "i");
+    return matchedText.replace(re, replacement);
+  } catch (_) {
+    return replacement;
+  }
+}
+
+function findReplaceOne() {
+  if (findState.index < 0 || !findState.matches.length) return;
+  const m = findState.matches[findState.index];
+  const replacement = findExpand(m.text);
+  editor.value = editor.value.slice(0, m.start) + replacement + editor.value.slice(m.end);
+  const caret = m.start + replacement.length;
+  markUnsaved();
+  queueRender();
+  editor.setSelectionRange(caret, caret);
+  findRefresh(false);
+}
+
+function findReplaceAll() {
+  findBuild();
+  if (!findState.matches.length) return;
+  const matches = findState.matches.slice();
+  let out = "";
+  let last = 0;
+  let count = 0;
+  for (const m of matches) {
+    if (m.start < last) continue;
+    out += editor.value.slice(last, m.start) + findExpand(m.text);
+    last = m.end;
+    count++;
+  }
+  out += editor.value.slice(last);
+  editor.value = out;
+  editor.setSelectionRange(0, 0);
+  markUnsaved();
+  queueRender();
+  findRefresh(false);
+  findCount.textContent = `${count} replaced`;
+}
+
+function openFind() {
+  if (state.viewMode === "preview") setViewMode("split");
+  findState.active = true;
+  findBar.classList.remove("hidden");
+  const sel = editor.value.slice(editor.selectionStart, editor.selectionEnd);
+  if (sel && !sel.includes("\n") && sel.length <= 200) findInput.value = sel;
+  findInput.focus();
+  findInput.select();
+  findRefresh(false);
+}
+
+function closeFind() {
+  findState.active = false;
+  findBar.classList.add("hidden");
+  findState.matches = [];
+  findState.index = -1;
+  findCount.textContent = "0/0";
+  renderHighlight(true);
+  editor.focus();
+}
+
+findInput.addEventListener("input", () => findRefresh(false));
+findInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (findState.matches.length) findStep(e.shiftKey ? -1 : 1);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeFind();
+  }
+});
+replaceInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (e.metaKey || e.ctrlKey) findReplaceAll();
+    else findReplaceOne();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeFind();
+  }
+});
+findCaseChk.addEventListener("change", () => findRefresh(false));
+findRegexChk.addEventListener("change", () => findRefresh(false));
+document.getElementById("find-next").addEventListener("click", () => findStep(1));
+document.getElementById("find-prev").addEventListener("click", () => findStep(-1));
+document.getElementById("find-replace").addEventListener("click", findReplaceOne);
+document.getElementById("find-replace-all").addEventListener("click", findReplaceAll);
+document.getElementById("find-close").addEventListener("click", closeFind);
+
+// Keep the mirror layer aligned while scrolling, resizing and on IME composition
+editor.addEventListener("scroll", syncHighlightLayout, { passive: true });
+window.addEventListener("resize", syncHighlightLayout);
+editor.addEventListener("compositionstart", () => editorContainer.classList.remove("hl-on"));
+editor.addEventListener("compositionend", () => {
+  renderHighlight(true);
+});
+
 // KaTeX Math Rendering Engine
 function renderMath(container) {
   if (typeof katex === "undefined" || !state.config.enableMath) return;
@@ -863,6 +1265,8 @@ getVizInstance().then(() => {
 
 let lastRenderedContent = null;
 async function updateRender(force = false) {
+  scheduleHighlight();
+  if (findState.active) findRefresh(false, false, false);
   const content = editor.value;
   if (!force && content === lastRenderedContent) return;
   lastRenderedContent = content;
@@ -1318,6 +1722,24 @@ function resetFontSize() {
 window.addEventListener("keydown", e => {
   const ctrl = e.ctrlKey || e.metaKey;
   const key = e.key.toLowerCase();
+  const inFindBar = !!(e.target && e.target.closest && e.target.closest(".find-bar"));
+
+  // Escape closes the find bar before anything else
+  if (e.key === "Escape" && findState.active) {
+    e.preventDefault();
+    closeFind();
+    return;
+  }
+
+  // Inside the find bar only find/save shortcuts apply
+  if (inFindBar && !(ctrl && (key === "s" || key === "f"))) return;
+
+  // Find & Replace: Cmd/Ctrl + F
+  if (ctrl && !e.shiftKey && key === "f") {
+    e.preventDefault();
+    openFind();
+    return;
+  }
 
   // New Tab: Cmd+T
   if (ctrl && key === "t") {
@@ -1503,6 +1925,7 @@ function escapeHtml(str) {
 // Event Bindings
 editor.addEventListener("input", () => {
   queueRender();
+  scheduleHighlight();
 });
 
 document.getElementById("btn-spell").addEventListener("click", () => {

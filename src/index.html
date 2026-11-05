@@ -109,8 +109,24 @@
           </label>
         </div>
       </div>
+      <!-- Find & Replace -->
+      <div class="find-bar hidden" id="find-bar">
+        <input id="find-input" class="find-field" type="text" placeholder="Find" spellcheck="false" autocomplete="off" aria-label="Find">
+        <span class="find-count" id="find-count">0/0</span>
+        <button id="find-prev" class="find-btn" title="Previous match (Shift+Enter)">&#8593;</button>
+        <button id="find-next" class="find-btn" title="Next match (Enter)">&#8595;</button>
+        <span class="find-sep"></span>
+        <input id="replace-input" class="find-field" type="text" placeholder="Replace" spellcheck="false" autocomplete="off" aria-label="Replace">
+        <button id="find-replace" class="find-btn" title="Replace this match (Enter)">Replace</button>
+        <button id="find-replace-all" class="find-btn" title="Replace all matches (&#8984;Enter)">All</button>
+        <span class="find-sep"></span>
+        <label class="find-opt" title="Match case"><input type="checkbox" id="find-case"><span>Aa</span></label>
+        <label class="find-opt" title="Regular expression"><input type="checkbox" id="find-regex"><span>.*</span></label>
+        <button id="find-close" class="find-btn find-close" title="Close (Esc)">&times;</button>
+      </div>
       <div class="editor-container">
-        <textarea id="markdown-input" spellcheck="false" placeholder="Write markdown here... (CommonMark, GFM, Math, Frontmatter)"></textarea>
+        <div class="editor-highlight" id="editor-highlight" aria-hidden="true"><pre id="highlight-code"></pre></div>
+        <textarea id="markdown-input" spellcheck="false" autocomplete="off" placeholder="Write markdown here... (CommonMark, GFM, Math, Frontmatter)"></textarea>
       </div>
     </section>
 
