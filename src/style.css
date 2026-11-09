@@ -374,6 +374,16 @@ body {
   cursor: pointer;
 }
 
+/* ─── Removed chrome (hidden by default) ──────────────────────────────
+   The formatting toolbar and both pane headers (SOURCE / RENDERED) are
+   taken out to maximize the writing area. Sync-scroll keeps working — the
+   checkbox behind the hidden header stays checked. Delete these rules to
+   bring the bars back. */
+.format-toolbar,
+.pane-header {
+  display: none;
+}
+
 /* Editor Pane */
 .editor-pane {
   border-right: 1px solid var(--border-color);
