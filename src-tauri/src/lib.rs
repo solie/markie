@@ -435,6 +435,11 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn open_url(url: String) -> Result<(), String> {
+        open::that(&url).map_err(|err| format!("Failed to open URL {url}: {err}"))
+    }
+
+    #[tauri::command]
     pub fn exit_app(app_handle: tauri::AppHandle) {
         app_handle.exit(0);
     }
@@ -453,6 +458,7 @@ pub fn run() {
             commands::save_file,
             commands::get_initial_file,
             commands::export_html,
+            commands::open_url,
             commands::exit_app,
             commands::allow_document_dir,
             commands::file_modified_time,

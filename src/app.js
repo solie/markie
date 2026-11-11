@@ -2154,3 +2154,18 @@ window.addEventListener("drop", async e => {
     updateCursorPos();
   }
 });
+
+// Open external links in the system browser instead of navigating the webview.
+// A single delegated listener on the preview container survives innerHTML swaps.
+const EXTERNAL_LINK_RE = /^(https?:|mailto:|tel:|ftp:|ftps:)/i;
+preview.addEventListener("click", (e) => {
+  const anchor = e.target.closest("a[href]");
+  if (!anchor) return;
+  const href = anchor.getAttribute("href") || "";
+  if (!EXTERNAL_LINK_RE.test(href)) return; // internal anchors / relative links stay in-app
+  e.preventDefault();
+  e.stopPropagation();
+  invoke("open_url", { url: href }).catch((err) =>
+    console.error("Failed to open external URL:", err)
+  );
+});
