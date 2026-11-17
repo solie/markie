@@ -11,7 +11,7 @@ A high-performance desktop Markdown editor and live viewer built with **[markdow
 * **Split-Pane & Synchronized Scrolling:** Edit markdown on the left, live view rendered output on the right with locked scrolling.
 * **Interactive Checkboxes:** Click task-list checkboxes in the preview to automatically toggle `- [ ]` and `- [x]` in the editor.
 * **Math & Frontmatter:** Built-in math expression support ($...$ and $$...$$) and YAML frontmatter parsing.
-* **File Operations:** Native file open, save, and standalone HTML export via native file dialogs.
+* **File Operations:** Native file open, save, and export to HTML, Word (.docx), or PDF via native file dialogs.
 * **Dark / Light Modes:** Built-in themes with GitHub-styled typography.
 
 ---
@@ -46,6 +46,7 @@ Markie/
 | `open_file` | `() -> Option<FilePayload>` | Prompts native file picker and returns document content. |
 | `save_file` | `(path: Option<String>, content: String) -> FilePayload` | Saves markdown file to disk. |
 | `export_html` | `(path: Option<String>, html: String, title: String) -> String` | Exports self-contained HTML file. |
+| `export_document` | `(path: Option<String>, content: String, source_path: Option<String>, title: String, format: String) -> String` | Exports DOCX or PDF by piping Markdown through Pandoc. Requires `pandoc`; PDF also needs a LaTeX engine (MacTeX, tectonic, typst). |
 
 ---
 

@@ -20,7 +20,7 @@ Markie is a lightweight, blisteringly fast desktop Markdown editor and live view
 * **100% Safe & Compliant:** Rust state-machine parser handles CommonMark + GFM.
 * **AST Inspector:** View and copy the full \`mdast\` syntax tree generated directly by Rust.
 * **Live Sync Scroll:** Real-time synchronized reading and editing.
-* **Native File I/O:** Fast native file open, save, and standalone HTML export.
+* **Native File I/O:** Fast native file open, save, and HTML/DOCX/PDF export.
 
 ---
 
@@ -311,7 +311,7 @@ async function invoke(cmd, args = {}) {
     } catch (err) {
       console.warn(`Tauri command ${cmd} failed, checking fallback:`, err);
       // If error is permission or invocation, allow fallback if useful
-      if (cmd === "open_file" || cmd === "save_file" || cmd === "export_html") {
+      if (cmd === "open_file" || cmd === "save_file" || cmd === "export_html" || cmd === "export_document") {
         throw err;
       }
     }
@@ -399,6 +399,10 @@ function mockInvoke(cmd, args) {
     a.download = `${args.title || "document"}.html`;
     a.click();
     return Promise.resolve(a.download);
+  } else if (cmd === "export_document") {
+    return Promise.reject(
+      "DOCX/PDF export requires the desktop app with Pandoc installed."
+    );
   } else if (cmd === "get_initial_file") {
     return Promise.resolve(null);
   }
@@ -1518,16 +1522,27 @@ async function handleSave() {
   }
 }
 
-async function handleExport() {
+async function handleExport(format = "html") {
   try {
     const title = state.currentName.replace(/\.[^/.]+$/, "");
-    const savedPath = await invoke("export_html", {
-      path: null,
-      html: preview.innerHTML,
-      title
-    });
+    let savedPath;
+    if (format === "html") {
+      savedPath = await invoke("export_html", {
+        path: null,
+        html: preview.innerHTML,
+        title
+      });
+    } else {
+      savedPath = await invoke("export_document", {
+        path: null,
+        content: editor.value,
+        sourcePath: state.currentPath,
+        title,
+        format
+      });
+    }
     if (savedPath) {
-      alert("Exported standalone HTML: " + savedPath);
+      alert(`Exported ${format.toUpperCase()}: ` + savedPath);
     }
   } catch (err) {
     if (err !== "Export cancelled") {
@@ -1946,10 +1961,28 @@ spellList.addEventListener("click", (e) => {
   applySuggestion(Number(btn.dataset.idx), btn.dataset.word);
 });
 
+const exportMenu = document.getElementById("export-menu");
+const closeExportMenu = () => exportMenu.classList.add("hidden");
+
 document.getElementById("btn-new").addEventListener("click", handleNew);
 document.getElementById("btn-open").addEventListener("click", handleOpen);
 document.getElementById("btn-save").addEventListener("click", handleSave);
-document.getElementById("btn-export").addEventListener("click", handleExport);
+document.getElementById("btn-export").addEventListener("click", (e) => {
+  e.stopPropagation();
+  exportMenu.classList.toggle("hidden");
+});
+exportMenu.addEventListener("click", (e) => {
+  const item = e.target.closest(".export-item");
+  if (!item) return;
+  closeExportMenu();
+  handleExport(item.dataset.format);
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".export-wrap")) closeExportMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeExportMenu();
+});
 
 document.getElementById("view-split").addEventListener("click", () => setViewMode("split"));
 document.getElementById("view-edit").addEventListener("click", () => setViewMode("edit"));

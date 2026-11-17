@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 
@@ -147,6 +150,49 @@ pub fn html_escape(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+/// GUI launches on macOS get a minimal PATH, so search the usual install dirs too.
+fn pandoc_candidates() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["pandoc.exe", r"C:\Program Files\Pandoc\pandoc.exe"]
+    } else {
+        vec![
+            "pandoc",
+            "/opt/homebrew/bin/pandoc",
+            "/usr/local/bin/pandoc",
+            "/usr/bin/pandoc",
+        ]
+    }
+}
+
+pub fn find_pandoc() -> Option<String> {
+    pandoc_candidates().into_iter().find(|candidate| {
+        Command::new(candidate)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }).map(str::to_string)
+}
+
+/// PATH for child tools. Pandoc shells out to a PDF engine (pdflatex, tectonic, ...),
+/// which is also missed under a GUI launch.
+fn tool_path() -> String {
+    let mut dirs: Vec<String> = Vec::new();
+    if !cfg!(windows) {
+        dirs.extend(
+            ["/opt/homebrew/bin", "/usr/local/bin", "/Library/TeX/texbin"]
+                .iter()
+                .map(|s| s.to_string()),
+        );
+    }
+    if let Ok(existing) = std::env::var("PATH") {
+        dirs.push(existing);
+    }
+    dirs.join(if cfg!(windows) { ";" } else { ":" })
 }
 
 pub mod commands {
@@ -434,6 +480,115 @@ pub mod commands {
         Ok(target_path.to_string_lossy().to_string())
     }
 
+    /// Converts the editor buffer to DOCX or PDF by piping it through Pandoc.
+    #[tauri::command]
+    pub fn export_document(
+        path: Option<String>,
+        content: String,
+        source_path: Option<String>,
+        title: String,
+        format: String,
+    ) -> Result<String, String> {
+        let format = format.to_ascii_lowercase();
+        if format != "docx" && format != "pdf" {
+            return Err(format!("Unsupported export format: {format}"));
+        }
+
+        let pandoc = find_pandoc().ok_or_else(|| {
+            "Pandoc not found. Install it first (macOS: `brew install pandoc`; PDF also needs a \
+             LaTeX engine such as MacTeX or tectonic)."
+                .to_string()
+        })?;
+
+        let target_path = match path {
+            Some(p) if !p.trim().is_empty() => PathBuf::from(p),
+            _ => {
+                let dialog = if format == "pdf" {
+                    rfd::FileDialog::new()
+                        .set_file_name(format!("{}.pdf", generate_slug(&title)))
+                        .add_filter("PDF Files", &["pdf"])
+                } else {
+                    rfd::FileDialog::new()
+                        .set_file_name(format!("{}.docx", generate_slug(&title)))
+                        .add_filter("Word Documents", &["docx"])
+                };
+                match dialog.save_file() {
+                    Some(p) => p,
+                    None => return Err("Export cancelled".to_string()),
+                }
+            }
+        };
+        let target_path = if target_path
+            .extension()
+            .map(|ext| ext.eq_ignore_ascii_case(&format))
+            .unwrap_or(false)
+        {
+            target_path
+        } else {
+            target_path.with_extension(&format)
+        };
+
+        let base_dir = source_path
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|p| p.is_file())
+            .and_then(|p| p.parent().map(|parent| parent.to_path_buf()));
+
+        let mut cmd = Command::new(&pandoc);
+        cmd.env("PATH", tool_path())
+            .arg("-f")
+            .arg("markdown")
+            .arg("-t")
+            .arg(&format)
+            .arg("--standalone")
+            .arg("--metadata")
+            .arg(format!("title={title}"))
+            .arg("-o")
+            .arg(&target_path)
+            .arg("-")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if let Some(dir) = base_dir.as_ref() {
+            cmd.current_dir(dir);
+            cmd.arg("--resource-path").arg(dir);
+        }
+        if format == "pdf" {
+            cmd.arg("-V").arg("geometry:margin=1in");
+        }
+
+        let mut child = cmd.spawn().map_err(|err| format!("Failed to run pandoc: {err}"))?;
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| "Failed to pipe document into pandoc".to_string())?
+            .write_all(content.as_bytes())
+            .map_err(|err| format!("Failed to send document to pandoc: {err}"))?;
+
+        let output = child
+            .wait_with_output()
+            .map_err(|err| format!("Pandoc did not finish: {err}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr = stderr.trim();
+            let detail = if stderr.is_empty() {
+                "no error output".to_string()
+            } else {
+                stderr.chars().take(1000).collect()
+            };
+            let hint = if format == "pdf" {
+                "\n\nPDF export needs a LaTeX engine (MacTeX, tectonic, or typst)."
+            } else {
+                ""
+            };
+            return Err(format!("Pandoc export failed: {detail}{hint}"));
+        }
+
+        Ok(target_path.to_string_lossy().to_string())
+    }
+
     #[tauri::command]
     pub fn open_url(url: String) -> Result<(), String> {
         open::that(&url).map_err(|err| format!("Failed to open URL {url}: {err}"))
@@ -458,6 +613,7 @@ pub fn run() {
             commands::save_file,
             commands::get_initial_file,
             commands::export_html,
+            commands::export_document,
             commands::open_url,
             commands::exit_app,
             commands::allow_document_dir,
@@ -523,6 +679,72 @@ mod tests {
             "raw SVG must not be HTML-escaped, got:\n{}",
             res.html
         );
+    }
+
+    #[test]
+    fn test_export_rejects_unknown_format() {
+        let err = commands::export_document(
+            None,
+            "# x".to_string(),
+            None,
+            "t".to_string(),
+            "rtf".to_string(),
+        )
+        .unwrap_err();
+        assert!(err.contains("Unsupported export format"), "{err}");
+    }
+
+    #[test]
+    fn test_export_docx_via_pandoc() {
+        if find_pandoc().is_none() {
+            eprintln!("pandoc is not installed; skipping DOCX export test");
+            return;
+        }
+        let dir = std::env::temp_dir().join("markie-export-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("doc.docx");
+
+        let exported = commands::export_document(
+            Some(out.to_string_lossy().to_string()),
+            "# Title\n\nHello **world**".to_string(),
+            None,
+            "doc".to_string(),
+            "docx".to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(exported, out.to_string_lossy());
+        assert!(fs::metadata(&out).unwrap().len() > 0, "DOCX must not be empty");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_export_pdf_via_pandoc() {
+        let has_engine = ["pdflatex", "xelatex", "lualatex", "tectonic", "typst"]
+            .iter()
+            .any(|engine| Command::new(engine).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false));
+        if find_pandoc().is_none() || !has_engine {
+            eprintln!("pandoc or a PDF engine is missing; skipping PDF export test");
+            return;
+        }
+        let dir = std::env::temp_dir().join("markie-export-pdf-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("doc.pdf");
+
+        commands::export_document(
+            Some(out.to_string_lossy().to_string()),
+            "# Title\n\nHello **world**".to_string(),
+            None,
+            "doc".to_string(),
+            "pdf".to_string(),
+        )
+        .unwrap();
+
+        let bytes = fs::read(&out).unwrap();
+        assert_eq!(&bytes[..5], b"%PDF-", "output must be a PDF file");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
