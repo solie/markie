@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Fast desktop Markdown editor and viewer powered by markdown-rs and Tauri"
 authors = ["Markie Team"]
 edition = "2021"
+license = "MIT"
 
 [lib]
 name = "markie_lib"
