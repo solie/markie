@@ -2030,23 +2030,81 @@ document.getElementById("sync-scroll-chk").addEventListener("change", e => {
   state.syncScroll = e.target.checked;
 });
 
-// Theme Toggle
+// Theme system: named themes + picker menu, persisted in localStorage.
 const themeBtn = document.getElementById("btn-theme");
 const iconDark = document.getElementById("theme-icon-dark");
 const iconLight = document.getElementById("theme-icon-light");
+const themeMenu = document.getElementById("theme-menu");
 
-themeBtn.addEventListener("click", () => {
-  const isDark = document.body.classList.contains("theme-dark");
-  if (isDark) {
-    document.body.classList.replace("theme-dark", "theme-light");
-    iconDark.classList.add("hidden");
-    iconLight.classList.remove("hidden");
-  } else {
-    document.body.classList.replace("theme-light", "theme-dark");
-    iconLight.classList.add("hidden");
-    iconDark.classList.remove("hidden");
+const THEMES = {
+  "theme-dark":             { name: "GitHub Dark",          light: false },
+  "theme-light":            { name: "GitHub Light",         light: true  },
+  "theme-catppuccin-mocha": { name: "Catppuccin Mocha",     light: false },
+  "theme-catppuccin-latte": { name: "Catppuccin Latte",     light: true  },
+  "theme-tokyo-night":      { name: "Tokyo Night",          light: false },
+  "theme-tokyo-day":        { name: "Tokyo Night Day",      light: true  },
+  "theme-nord":             { name: "Nord",                 light: false },
+  "theme-dracula":          { name: "Dracula",              light: false },
+  "theme-rose-pine":        { name: "Rosé Pine",            light: false },
+  "theme-solarized":        { name: "Solarized Dark",       light: false },
+  "theme-solarized-light":  { name: "Solarized Light",      light: true  },
+  "theme-one-light":        { name: "One Light",            light: true  }
+};
+
+function currentThemeClass() {
+  return Object.keys(THEMES).find(c => document.body.classList.contains(c)) || "theme-dark";
+}
+
+function setTheme(cls, persist = true) {
+  if (!THEMES[cls]) cls = "theme-dark";
+  Object.keys(THEMES).forEach(c => document.body.classList.remove(c));
+  document.body.classList.add(cls);
+  const isLight = THEMES[cls].light;
+  iconDark.classList.toggle("hidden", isLight);
+  iconLight.classList.toggle("hidden", !isLight);
+  if (persist) {
+    try { localStorage.setItem("markie.theme", cls); } catch (_) {}
+  }
+}
+
+function buildThemeMenu() {
+  if (!themeMenu) return;
+  themeMenu.innerHTML = "";
+  Object.entries(THEMES).forEach(([cls, meta]) => {
+    const item = document.createElement("div");
+    item.className = "theme-menu-item";
+    item.textContent = meta.name;
+    item.dataset.theme = cls;
+    item.addEventListener("click", () => {
+      setTheme(cls);
+      themeMenu.classList.add("hidden");
+    });
+    themeMenu.appendChild(item);
+  });
+}
+buildThemeMenu();
+
+themeBtn.addEventListener("click", (e) => {
+  if (themeMenu) {
+    const cur = currentThemeClass();
+    themeMenu.querySelectorAll(".theme-menu-item").forEach(el => {
+      el.classList.toggle("theme-active", el.dataset.theme === cur);
+    });
+    themeMenu.classList.toggle("hidden");
   }
 });
+
+document.addEventListener("click", (e) => {
+  if (!themeMenu || themeMenu.classList.contains("hidden")) return;
+  if (!themeMenu.contains(e.target) && !themeBtn.contains(e.target)) {
+    themeMenu.classList.add("hidden");
+  }
+});
+
+try {
+  const savedTheme = localStorage.getItem("markie.theme");
+  if (savedTheme && THEMES[savedTheme]) setTheme(savedTheme, false);
+} catch (_) {}
 
 // Settings Modal
 const settingsBtn = document.getElementById("btn-settings");
